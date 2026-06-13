@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
-
-const CONTRACT = "0x45F6bef6812834bC17ff5798738e543FB4cA7A8E";
+import { read, write, CONTRACT } from "./genlayer";
 
 type Category =
   | "Science"
@@ -12,13 +11,14 @@ type Category =
   | "Economics";
 
 interface Fact {
-  id: number;
+  key: string;
   claim: string;
   body: string;
   category: Category;
   validity: number; // 0-100 consensus strength
+  valid: boolean;
   source: string;
-  validated: string; // ISO date
+  validations: number;
 }
 
 const CATEGORIES: Category[] = [
@@ -29,46 +29,26 @@ const CATEGORIES: Category[] = [
   "Economics",
 ];
 
-let _fid = 100;
+// Normalise a 0-1 or 0-100 value into a 0-100 integer.
+function pct(v: any) {
+  let n = Number(v ?? 0);
+  if (!Number.isFinite(n)) n = 0;
+  if (n > 0 && n <= 1) n *= 100;
+  return Math.round(n);
+}
 
-const SEED: Fact[] = [
-  {
-    id: 1,
-    claim: "Water boils at 100°C at one standard atmosphere of pressure.",
-    body: "At sea level (101.325 kPa) the vapor pressure of water equals atmospheric pressure at 100°C. Boiling point drops at altitude.",
-    category: "Science",
-    validity: 98,
-    source: "NIST Thermophysical Properties, 2023",
-    validated: "2026-05-02",
-  },
-  {
-    id: 2,
-    claim: "The Great Library of Alexandria was destroyed in a single fire.",
-    body: "Contested. Evidence points to gradual decline across several centuries and multiple events rather than one catastrophic blaze.",
-    category: "History",
-    validity: 41,
-    source: "Cambridge History of Libraries, vol. 1",
-    validated: "2026-03-18",
-  },
-  {
-    id: 3,
-    claim: "Transformer models scale predictably with compute and data.",
-    body: "Empirical scaling laws show test loss falls as a power law in model size, dataset size, and compute within observed ranges.",
-    category: "Technology",
-    validity: 86,
-    source: "Kaplan et al., Scaling Laws (2020)",
-    validated: "2026-06-01",
-  },
-  {
-    id: 4,
-    claim: "Mount Everest is the tallest mountain on Earth.",
-    body: "Highest above sea level (8,849 m). Measured base-to-peak, Mauna Kea is taller; by distance from Earth's center, Chimborazo wins.",
-    category: "Geography",
-    validity: 72,
-    source: "Survey of India / USGS",
-    validated: "2026-04-22",
-  },
-];
+function factFrom(i: number, raw: any): Fact {
+  return {
+    key: String(i),
+    claim: String(raw?.claim ?? ""),
+    body: String(raw?.reasoning ?? "Awaiting validator reasoning."),
+    category: CATEGORIES[i % CATEGORIES.length],
+    validity: pct(raw?.strength),
+    valid: Boolean(raw?.valid),
+    source: String(raw?.source ?? ""),
+    validations: Number(raw?.validations ?? 0),
+  };
+}
 
 const validityTone = (v: number) =>
   v >= 80
@@ -101,11 +81,13 @@ function StrengthMeter({ value }: { value: number }) {
 }
 
 function App() {
-  const [facts, setFacts] = useState<Fact[]>(SEED);
+  const [facts, setFacts] = useState<Fact[]>([]);
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<Category | "All">("All");
-  const [revalidating, setRevalidating] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [revalidating, setRevalidating] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState({
     claim: "",
     body: "",
@@ -131,45 +113,89 @@ function App() {
       );
   }, [facts, query, activeCat]);
 
-  const revalidate = (id: number) => {
-    setRevalidating(id);
-    toast.loading("Re-validating against current sources…", { id: `rv-${id}` });
-    setTimeout(() => {
+  async function loadFacts() {
+    setLoading(true);
+    try {
+      const stats = (await read("stats")) as any;
+      const total = Number(stats?.total_facts ?? 0);
+      const loaded: Fact[] = [];
+      for (let i = 0; i < total; i++) {
+        try {
+          const raw = (await read("get_fact", [String(i)])) as any;
+          if (raw) loaded.push(factFrom(i, raw));
+        } catch {
+          // skip
+        }
+      }
+      setFacts(loaded.reverse());
+    } catch (e: any) {
+      toast.error(`Failed to load facts: ${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadFacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const revalidate = async (key: string) => {
+    setRevalidating(key);
+    toast.loading("Re-validating against current sources… (30–60s)", { id: `rv-${key}` });
+    try {
+      await write("revalidate", [key]);
+      const raw = (await read("get_fact", [key])) as any;
       setFacts((fs) =>
-        fs.map((f) => {
-          if (f.id !== id) return f;
-          const drift = Math.round((Math.random() - 0.45) * 18);
-          const validity = Math.max(5, Math.min(99, f.validity + drift));
-          return {
-            ...f,
-            validity,
-            validated: new Date().toISOString().slice(0, 10),
-          };
-        })
+        fs.map((f) =>
+          f.key === key
+            ? {
+                ...f,
+                validity: pct(raw?.strength),
+                valid: Boolean(raw?.valid),
+                body: String(raw?.reasoning ?? f.body),
+                validations: Number(raw?.validations ?? f.validations),
+              }
+            : f
+        )
       );
+      toast.success("Consensus strength updated.", { id: `rv-${key}` });
+    } catch (e: any) {
+      toast.error(`Re-validation failed: ${e?.message ?? e}`, { id: `rv-${key}` });
+    } finally {
       setRevalidating(null);
-      toast.success("Consensus strength updated.", { id: `rv-${id}` });
-    }, 1600);
+    }
   };
 
-  const submitFact = () => {
+  const submitFact = async () => {
     if (!draft.claim.trim() || !draft.source.trim()) {
       toast.error("A claim and a source citation are required.");
       return;
     }
-    const fact: Fact = {
-      id: ++_fid,
-      claim: draft.claim.trim(),
-      body: draft.body.trim() || "Awaiting peer elaboration.",
-      category: draft.category,
-      validity: 50,
-      source: draft.source.trim(),
-      validated: new Date().toISOString().slice(0, 10),
-    };
-    setFacts((fs) => [fact, ...fs]);
-    setDraft({ claim: "", body: "", category: "Science", source: "" });
-    setComposing(false);
-    toast.success("Fact contributed — entering validation queue at 50%.");
+    setSubmitting(true);
+    const tid = toast.loading("Submitting fact for validation… (30–60s)");
+    try {
+      await write("post_fact", [draft.claim.trim(), draft.source.trim()]);
+      const stats = (await read("stats")) as any;
+      const total = Number(stats?.total_facts ?? 0);
+      try {
+        const raw = (await read("get_fact", [String(total - 1)])) as any;
+        const f = factFrom(total - 1, raw);
+        toast.success(
+          `Fact contributed — ${f.valid ? "validated" : "contested"} at ${f.validity}% strength.`,
+          { id: tid }
+        );
+      } catch {
+        toast.success("Fact contributed to the archive.", { id: tid });
+      }
+      setDraft({ claim: "", body: "", category: "Science", source: "" });
+      setComposing(false);
+      await loadFacts();
+    } catch (e: any) {
+      toast.error(`Submit failed: ${e?.message ?? e}`, { id: tid });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -261,7 +287,7 @@ function App() {
               {activeCat === "All" ? "All entries" : activeCat}
             </h2>
             <span className="text-sm text-[#312E81]/50">
-              {visible.length} {visible.length === 1 ? "entry" : "entries"}
+              {loading ? "loading…" : `${visible.length} ${visible.length === 1 ? "entry" : "entries"}`}
             </span>
           </div>
 
@@ -269,7 +295,7 @@ function App() {
             <AnimatePresence>
               {visible.map((f) => (
                 <motion.article
-                  key={f.id}
+                  key={f.key}
                   layout
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -285,6 +311,16 @@ function App() {
                       }}
                     >
                       {f.category}
+                    </span>
+                    <span
+                      className="rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        color: f.valid ? "#1f7a4d" : "#9a2c2c",
+                        backgroundColor: f.valid ? "#e3f3ea" : "#f6e0e0",
+                      }}
+                    >
+                      {f.valid ? "✓ valid" : "✕ contested"}
                     </span>
                   </div>
                   <h3 className="text-xl font-semibold leading-snug text-[#1f1d2b]">
@@ -307,24 +343,29 @@ function App() {
                       <cite className="not-italic">{f.source}</cite>
                     </span>
                     <span>
-                      <span className="text-[#312E81]/40">Last validated:</span>{" "}
-                      {f.validated}
+                      <span className="text-[#312E81]/40">Validations:</span>{" "}
+                      {f.validations}
                     </span>
                     <button
-                      onClick={() => revalidate(f.id)}
-                      disabled={revalidating === f.id}
+                      onClick={() => revalidate(f.key)}
+                      disabled={revalidating === f.key}
                       className="ml-auto rounded border border-[#312E81]/30 px-2.5 py-1 font-medium text-[#312E81] transition hover:bg-[#312E81]/5 disabled:opacity-50"
                     >
-                      {revalidating === f.id ? "validating…" : "↻ Re-validate"}
+                      {revalidating === f.key ? "validating…" : "↻ Re-validate"}
                     </button>
                   </div>
                 </motion.article>
               ))}
             </AnimatePresence>
 
-            {visible.length === 0 && (
+            {!loading && visible.length === 0 && (
               <p className="py-16 text-center italic text-[#312E81]/40">
                 No entries match this search.
+              </p>
+            )}
+            {loading && (
+              <p className="py-16 text-center italic text-[#312E81]/40">
+                Loading the archive from chain…
               </p>
             )}
           </div>
@@ -339,7 +380,7 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setComposing(false)}
+            onClick={() => !submitting && setComposing(false)}
           >
             <motion.div
               onClick={(e) => e.stopPropagation()}
@@ -352,8 +393,7 @@ function App() {
                 Contribute a fact
               </h3>
               <p className="mb-4 text-sm italic text-[#312E81]/55">
-                New entries enter the archive at 50% consensus and are validated
-                over time.
+                New entries are validated on-chain by the consensus network.
               </p>
               <div className="space-y-3" style={{ fontFamily: "'Inter', sans-serif" }}>
                 <input
@@ -384,7 +424,7 @@ function App() {
                   <input
                     value={draft.source}
                     onChange={(e) => setDraft({ ...draft, source: e.target.value })}
-                    placeholder="Source citation"
+                    placeholder="Source citation / URL"
                     className="w-1/2 rounded-md border border-[#312E81]/20 bg-white px-3 py-2 text-sm outline-none focus:border-[#312E81]/50"
                   />
                 </div>
@@ -392,15 +432,17 @@ function App() {
               <div className="mt-5 flex justify-end gap-3" style={{ fontFamily: "'Inter', sans-serif" }}>
                 <button
                   onClick={() => setComposing(false)}
-                  className="rounded-md px-4 py-2 text-sm text-[#312E81]/60 transition hover:text-[#312E81]"
+                  disabled={submitting}
+                  className="rounded-md px-4 py-2 text-sm text-[#312E81]/60 transition hover:text-[#312E81] disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={submitFact}
-                  className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e]"
+                  disabled={submitting}
+                  className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e] disabled:opacity-50"
                 >
-                  Submit to archive
+                  {submitting ? "Submitting…" : "Submit to archive"}
                 </button>
               </div>
             </motion.div>
