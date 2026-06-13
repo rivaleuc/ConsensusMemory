@@ -1,15 +1,41 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ConsensusMemory</title><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-950 text-white min-h-screen p-6"><div class="max-w-2xl mx-auto">
-<h1 class="text-2xl font-bold mb-6">🧠 ConsensusMemory</h1>
-<div class="bg-gray-900 rounded-xl p-6 mb-4 border border-gray-800 space-y-3">
-<h2 class="text-cyan-400 font-semibold">Post a Fact</h2>
-<input id="claim" placeholder="Factual claim..." class="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 outline-none">
-<input id="source" placeholder="Source URL" class="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 outline-none">
-<button class="w-full bg-cyan-600 hover:bg-cyan-700 rounded-lg py-3 font-bold">Submit for Validation</button>
-</div>
-<div class="bg-gray-900 rounded-xl p-6 border border-gray-800 space-y-3">
-<h2 class="text-amber-400 font-semibold">Revalidate Fact</h2>
-<input id="key" placeholder="Fact key" class="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 outline-none">
-<button class="w-full bg-amber-600 hover:bg-amber-700 rounded-lg py-3 font-bold">⟳ Revalidate</button>
-</div>
-</div></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ConsensusMemory</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0d1117] text-white min-h-screen">
+  <nav class="bg-[#161b22] border-b border-gray-800 px-6 py-4 flex justify-between items-center">
+    <div class="flex items-center gap-2"><span class="text-2xl">🧠</span><h1 class="text-xl font-bold">ConsensusMemory</h1></div>
+    <span class="text-xs text-gray-500">Protocol Knowledge Base</span>
+  </nav>
+  <main class="max-w-3xl mx-auto p-6 space-y-6">
+    <!-- Post Fact -->
+    <section class="bg-[#161b22] rounded-2xl p-6 border border-gray-800">
+      <h2 class="text-cyan-400 font-semibold mb-4">Submit Fact for Validation</h2>
+      <input placeholder="Factual claim" class="w-full bg-[#0d1117] border border-gray-700 rounded-xl px-4 py-3 mb-3 placeholder-gray-600 outline-none">
+      <input placeholder="Source URL (evidence)" class="w-full bg-[#0d1117] border border-gray-700 rounded-xl px-4 py-3 mb-3 placeholder-gray-600 outline-none">
+      <button class="w-full bg-cyan-600 hover:bg-cyan-500 rounded-xl py-3 font-bold transition">Submit & Validate</button>
+    </section>
+
+    <!-- Facts List -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase tracking-wider mb-3">Collective Knowledge</h3>
+      <div class="bg-[#161b22] rounded-xl border border-gray-800 divide-y divide-gray-800">
+        <div class="p-4 flex items-center justify-between">
+          <div>
+            <p class="text-sm">"Eiffel Tower is 330 meters tall"</p>
+            <p class="text-xs text-gray-500 mt-1">Source: wikipedia.org/wiki/Eiffel_Tower</p>
+          </div>
+          <div class="text-center">
+            <div class="w-10 h-10 rounded-full bg-red-900/30 border border-red-800 flex items-center justify-center text-xs font-bold text-red-400">0</div>
+            <p class="text-[10px] text-gray-600 mt-1">strength</p>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-gray-600 mt-2 text-center">Facts evolve — revalidate as sources update</p>
+    </section>
+  </main>
+</body>
+</html>
