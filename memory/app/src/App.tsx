@@ -1,341 +1,414 @@
-import { useState, type FormEvent } from "react";
-import { motion } from "framer-motion";
+import { useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 
 const CONTRACT = "0x45F6bef6812834bC17ff5798738e543FB4cA7A8E";
 
-type Verdict = {
-  valid: boolean;
-  strength: number;
-  reasoning: string;
-  validations: number;
-};
+type Category =
+  | "Science"
+  | "History"
+  | "Technology"
+  | "Geography"
+  | "Economics";
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 26 },
-  show: { opacity: 1, y: 0 },
-};
+interface Fact {
+  id: number;
+  claim: string;
+  body: string;
+  category: Category;
+  validity: number; // 0-100 consensus strength
+  source: string;
+  validated: string; // ISO date
+}
 
-const FACTS = [
-  { claim: "The Antikythera mechanism is the earliest known analog computer.", source: "British Museum", valid: true, strength: 97, validations: 12 },
-  { claim: "Honey never spoils under proper storage conditions.", source: "Smithsonian", valid: true, strength: 88, validations: 9 },
-  { claim: "The Great Wall of China is visible from space with the naked eye.", source: "NASA", valid: false, strength: 14, validations: 21 },
-  { claim: "Octopuses have three hearts and blue blood.", source: "Marine Biology Rev.", valid: true, strength: 94, validations: 7 },
-  { claim: "Goldfish have a three-second memory span.", source: "Animal Cognition", valid: false, strength: 22, validations: 15 },
-  { claim: "Light takes about 8 minutes to travel from the Sun to Earth.", source: "ESA", valid: true, strength: 99, validations: 18 },
+const CATEGORIES: Category[] = [
+  "Science",
+  "History",
+  "Technology",
+  "Geography",
+  "Economics",
 ];
 
-const STEPS = [
-  { n: "I", title: "Submit a claim", body: "Contribute a fact along with a source the network can independently read." },
-  { n: "II", title: "AI validation", body: "Validators fetch the evidence and judge the claim's truth, assigning a strength score." },
-  { n: "III", title: "Evolve over time", body: "Facts are re-validated as new evidence emerges; strength rises or falls with the record." },
+let _fid = 100;
+
+const SEED: Fact[] = [
+  {
+    id: 1,
+    claim: "Water boils at 100°C at one standard atmosphere of pressure.",
+    body: "At sea level (101.325 kPa) the vapor pressure of water equals atmospheric pressure at 100°C. Boiling point drops at altitude.",
+    category: "Science",
+    validity: 98,
+    source: "NIST Thermophysical Properties, 2023",
+    validated: "2026-05-02",
+  },
+  {
+    id: 2,
+    claim: "The Great Library of Alexandria was destroyed in a single fire.",
+    body: "Contested. Evidence points to gradual decline across several centuries and multiple events rather than one catastrophic blaze.",
+    category: "History",
+    validity: 41,
+    source: "Cambridge History of Libraries, vol. 1",
+    validated: "2026-03-18",
+  },
+  {
+    id: 3,
+    claim: "Transformer models scale predictably with compute and data.",
+    body: "Empirical scaling laws show test loss falls as a power law in model size, dataset size, and compute within observed ranges.",
+    category: "Technology",
+    validity: 86,
+    source: "Kaplan et al., Scaling Laws (2020)",
+    validated: "2026-06-01",
+  },
+  {
+    id: 4,
+    claim: "Mount Everest is the tallest mountain on Earth.",
+    body: "Highest above sea level (8,849 m). Measured base-to-peak, Mauna Kea is taller; by distance from Earth's center, Chimborazo wins.",
+    category: "Geography",
+    validity: 72,
+    source: "Survey of India / USGS",
+    validated: "2026-04-22",
+  },
 ];
 
-const FEATURES = [
-  { title: "Evidence-bound", body: "Every fact is tied to a source and judged against it — no unsupported assertions." },
-  { title: "Validity strength", body: "A 0–100 score expresses how strongly the evidence backs each claim." },
-  { title: "Living knowledge", body: "Re-validation lets the archive correct itself as understanding improves." },
-  { title: "Consensus-checked", body: "Independent validators must agree before a fact enters the shared memory." },
-  { title: "Cited reasoning", body: "Each verdict carries a written rationale, so trust is transparent." },
-  { title: "Open archive", body: "Anyone can read the canon and propose a claim for the collective record." },
-];
+const validityTone = (v: number) =>
+  v >= 80
+    ? { label: "Strong consensus", color: "#1f7a4d", bg: "#e3f3ea" }
+    : v >= 55
+      ? { label: "Emerging", color: "#9a6b00", bg: "#f6eed8" }
+      : { label: "Contested", color: "#9a2c2c", bg: "#f6e0e0" };
 
-function StrengthMeter({ value, valid }: { value: number; valid: boolean }) {
-  const color = valid ? "#312E81" : "#9a3b3b";
+function StrengthMeter({ value }: { value: number }) {
+  const tone = validityTone(value);
   return (
-    <div>
-      <div className="mb-1 flex justify-between text-[11px] text-[#312E81]/60">
-        <span>Validity strength</span>
-        <span>{value}%</span>
+    <div className="w-full">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="font-medium" style={{ color: tone.color }}>
+          {tone.label}
+        </span>
+        <span className="font-mono text-[#312E81]/60">{value}%</span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-[#312E81]/10">
         <motion.div
-          initial={{ width: 0 }}
-          whileInView={{ width: `${value}%` }}
-          viewport={{ once: true }}
-          transition={{ duration: 1, ease: "easeOut" }}
           className="h-full rounded-full"
-          style={{ background: color }}
+          style={{ backgroundColor: tone.color }}
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.6 }}
         />
       </div>
     </div>
   );
 }
 
-export default function App() {
-  const [claim, setClaim] = useState("");
-  const [source, setSource] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<Verdict | null>(null);
+function App() {
+  const [facts, setFacts] = useState<Fact[]>(SEED);
+  const [query, setQuery] = useState("");
+  const [activeCat, setActiveCat] = useState<Category | "All">("All");
+  const [revalidating, setRevalidating] = useState<number | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [draft, setDraft] = useState({
+    claim: "",
+    body: "",
+    category: "Science" as Category,
+    source: "",
+  });
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!claim.trim()) {
-      toast.error("A claim is required.");
+  const counts = useMemo(() => {
+    const m: Record<string, number> = { All: facts.length };
+    CATEGORIES.forEach((c) => (m[c] = facts.filter((f) => f.category === c).length));
+    return m;
+  }, [facts]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return facts
+      .filter((f) => (activeCat === "All" ? true : f.category === activeCat))
+      .filter(
+        (f) =>
+          !q ||
+          f.claim.toLowerCase().includes(q) ||
+          f.body.toLowerCase().includes(q)
+      );
+  }, [facts, query, activeCat]);
+
+  const revalidate = (id: number) => {
+    setRevalidating(id);
+    toast.loading("Re-validating against current sources…", { id: `rv-${id}` });
+    setTimeout(() => {
+      setFacts((fs) =>
+        fs.map((f) => {
+          if (f.id !== id) return f;
+          const drift = Math.round((Math.random() - 0.45) * 18);
+          const validity = Math.max(5, Math.min(99, f.validity + drift));
+          return {
+            ...f,
+            validity,
+            validated: new Date().toISOString().slice(0, 10),
+          };
+        })
+      );
+      setRevalidating(null);
+      toast.success("Consensus strength updated.", { id: `rv-${id}` });
+    }, 1600);
+  };
+
+  const submitFact = () => {
+    if (!draft.claim.trim() || !draft.source.trim()) {
+      toast.error("A claim and a source citation are required.");
       return;
     }
-    setLoading(true);
-    setResult(null);
-    toast("Submitting to validators…", { description: "Fetching evidence and weighing the claim." });
-
-    setTimeout(() => {
-      const dubious = /always|never|everyone|nobody|cure|proves everything|100%/i.test(claim);
-      const verdict: Verdict = dubious
-        ? {
-            valid: false,
-            strength: 27,
-            validations: 1,
-            reasoning:
-              "The claim overgeneralises beyond what the cited evidence supports. Counter-examples exist, so it cannot enter the canon at full strength.",
-          }
-        : {
-            valid: true,
-            strength: 91,
-            validations: 1,
-            reasoning:
-              "The cited source corroborates the claim and no contradicting evidence was found. It is admitted to the shared memory with high validity strength.",
-          };
-      setResult(verdict);
-      setLoading(false);
-      toast[verdict.valid ? "success" : "error"](
-        verdict.valid ? "Validated" : "Not validated",
-        { description: `Strength: ${verdict.strength}%` }
-      );
-    }, 3000);
-  }
+    const fact: Fact = {
+      id: ++_fid,
+      claim: draft.claim.trim(),
+      body: draft.body.trim() || "Awaiting peer elaboration.",
+      category: draft.category,
+      validity: 50,
+      source: draft.source.trim(),
+      validated: new Date().toISOString().slice(0, 10),
+    };
+    setFacts((fs) => [fact, ...fs]);
+    setDraft({ claim: "", body: "", category: "Science", source: "" });
+    setComposing(false);
+    toast.success("Fact contributed — entering validation queue at 50%.");
+  };
 
   return (
-    <div className="min-h-screen bg-[#FBFAF7] text-[#1f1d2b] antialiased" style={{ fontFamily: "Inter, sans-serif" }}>
+    <div className="min-h-screen bg-[#FBFAF7] text-[#1f1d2b]" style={{ fontFamily: "'Spectral', Georgia, serif" }}>
       <Toaster position="top-center" richColors />
 
-      {/* Navbar */}
-      <header className="sticky top-0 z-40 border-b border-[#312E81]/12 bg-[#FBFAF7]/85 backdrop-blur">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <a href="#top" className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#312E81] text-sm text-[#FBFAF7]" style={{ fontFamily: "'Spectral', serif" }}>
-              CM
-            </span>
-            <span className="text-lg text-[#312E81]" style={{ fontFamily: "'Spectral', serif" }}>
-              Consensus<span className="font-semibold">Memory</span>
-            </span>
-          </a>
-          <div className="hidden items-center gap-8 text-sm text-[#1f1d2b]/65 md:flex">
-            <a href="#canon" className="hover:text-[#312E81]">The canon</a>
-            <a href="#how" className="hover:text-[#312E81]">How it works</a>
-            <a href="#features" className="hover:text-[#312E81]">Features</a>
-            <a href="#submit" className="rounded-full bg-[#312E81] px-4 py-2 text-[#FBFAF7] transition hover:bg-[#312E81]/90">
-              Submit a fact
-            </a>
+      {/* archive masthead + search */}
+      <header className="border-b border-[#312E81]/10 bg-white/70 backdrop-blur">
+        <div className="mx-auto max-w-5xl px-6 py-7">
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex items-baseline gap-3">
+              <span className="text-2xl text-[#312E81]">❧</span>
+              <h1 className="text-2xl font-semibold tracking-tight text-[#312E81]">
+                ConsensusMemory
+              </h1>
+              <span className="hidden text-sm italic text-[#312E81]/50 sm:inline">
+                a living archive of validated knowledge
+              </span>
+            </div>
+            <button
+              onClick={() => setComposing(true)}
+              className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e]"
+              style={{ fontFamily: "'Inter', sans-serif" }}
+            >
+              + Contribute fact
+            </button>
           </div>
-        </nav>
+
+          {/* big centered wiki search */}
+          <div className="relative mx-auto max-w-2xl">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-lg text-[#312E81]/40">
+              ⌕
+            </span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search the archive — claims, topics, evidence…"
+              className="w-full rounded-full border-2 border-[#312E81]/15 bg-white py-3.5 pl-12 pr-4 text-lg text-[#1f1d2b] shadow-sm outline-none transition focus:border-[#312E81]/50"
+            />
+          </div>
+        </div>
       </header>
 
-      {/* Hero */}
-      <section id="top" className="mx-auto max-w-6xl px-6 py-24 md:py-32">
-        <div className="grid items-center gap-12 md:grid-cols-2">
-          <motion.div initial="hidden" animate="show" variants={fadeUp} transition={{ duration: 0.7 }}>
-            <p className="mb-5 text-xs uppercase tracking-[0.3em] text-[#312E81]/60">A knowledge base that evolves</p>
-            <h1 className="text-5xl leading-[1.06] text-[#1f1d2b] md:text-6xl" style={{ fontFamily: "'Spectral', serif" }}>
-              A shared memory of <span className="text-[#312E81]">what is true</span>.
-            </h1>
-            <p className="mt-6 max-w-md text-base leading-relaxed text-[#1f1d2b]/70">
-              ConsensusMemory is a collective archive where every fact is validated by AI against its sources — and re-examined over time as understanding deepens.
-            </p>
-            <div className="mt-9 flex flex-wrap items-center gap-4">
-              <a href="#submit" className="rounded-full bg-[#312E81] px-7 py-3 text-sm text-[#FBFAF7] transition hover:bg-[#312E81]/90">
-                Contribute a fact
-              </a>
-              <a href="#canon" className="text-sm text-[#312E81] underline-offset-4 hover:underline">
-                Browse the canon →
-              </a>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.15 }}
-            className="rounded-2xl border border-[#312E81]/15 bg-white p-7 shadow-[0_30px_60px_-35px_rgba(49,46,129,0.45)]"
+      <div className="mx-auto grid max-w-5xl gap-8 px-6 py-10 md:grid-cols-[200px_1fr]">
+        {/* left category sidebar */}
+        <aside className="md:sticky md:top-6 md:self-start">
+          <p
+            className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#312E81]/50"
+            style={{ fontFamily: "'Inter', sans-serif" }}
           >
-            <div className="mb-4 flex items-center justify-between">
-              <span className="text-xs uppercase tracking-widest text-[#312E81]/55">Entry · verified</span>
-              <span className="rounded-full bg-[#312E81]/10 px-3 py-1 text-xs text-[#312E81]">18 validations</span>
-            </div>
-            <p className="text-xl leading-snug text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}>
-              “Light takes about 8 minutes to travel from the Sun to Earth.”
+            Categories
+          </p>
+          <ul className="space-y-1" style={{ fontFamily: "'Inter', sans-serif" }}>
+            {(["All", ...CATEGORIES] as const).map((c) => (
+              <li key={c}>
+                <button
+                  onClick={() => setActiveCat(c)}
+                  className={`flex w-full items-center justify-between rounded-md px-3 py-1.5 text-sm transition ${
+                    activeCat === c
+                      ? "bg-[#312E81] text-white"
+                      : "text-[#312E81]/70 hover:bg-[#312E81]/5"
+                  }`}
+                >
+                  <span>{c}</span>
+                  <span
+                    className={`text-xs ${
+                      activeCat === c ? "text-white/70" : "text-[#312E81]/40"
+                    }`}
+                  >
+                    {counts[c] ?? 0}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-6 rounded-md border border-[#312E81]/10 bg-white p-3 text-xs text-[#312E81]/60">
+            <p className="mb-1 font-semibold text-[#312E81]/80" style={{ fontFamily: "'Inter', sans-serif" }}>
+              On-chain registry
             </p>
-            <p className="mt-2 text-sm text-[#1f1d2b]/55">Source: ESA</p>
-            <div className="mt-5">
-              <StrengthMeter value={99} valid={true} />
-            </div>
-          </motion.div>
-        </div>
-      </section>
+            <p className="break-all font-mono text-[10px]">{CONTRACT}</p>
+          </div>
+        </aside>
 
-      {/* Canon / fact cards */}
-      <section id="canon" className="border-y border-[#312E81]/12 bg-white">
-        <div className="mx-auto max-w-6xl px-6 py-24">
-          <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.6 }}>
-            <h2 className="text-4xl text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}>From the canon</h2>
-            <p className="mt-3 max-w-xl text-[#1f1d2b]/65">A selection of entries, each carrying its validity strength and validation count.</p>
-          </motion.div>
+        {/* fact entry list */}
+        <main>
+          <div className="mb-4 flex items-baseline justify-between border-b border-[#312E81]/10 pb-2">
+            <h2 className="text-lg font-semibold text-[#312E81]">
+              {activeCat === "All" ? "All entries" : activeCat}
+            </h2>
+            <span className="text-sm text-[#312E81]/50">
+              {visible.length} {visible.length === 1 ? "entry" : "entries"}
+            </span>
+          </div>
 
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {FACTS.map((f, i) => (
-              <motion.article
-                key={f.claim}
-                initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.5, delay: i * 0.06 }}
-                className="flex flex-col justify-between rounded-xl border border-[#312E81]/12 bg-[#FBFAF7] p-6"
-              >
-                <div>
-                  <div className="mb-4 flex items-center justify-between">
-                    <span className={`rounded-full px-3 py-1 text-[11px] ${f.valid ? "bg-[#312E81]/10 text-[#312E81]" : "bg-[#9a3b3b]/10 text-[#9a3b3b]"}`}>
-                      {f.valid ? "✓ Validated" : "✕ Disputed"}
+          <div className="space-y-7">
+            <AnimatePresence>
+              {visible.map((f) => (
+                <motion.article
+                  key={f.id}
+                  layout
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="border-b border-[#312E81]/10 pb-6 last:border-0"
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <span
+                      className="rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#312E81]"
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        backgroundColor: "#312E8115",
+                      }}
+                    >
+                      {f.category}
                     </span>
-                    <span className="text-[11px] text-[#1f1d2b]/45">{f.validations} checks</span>
                   </div>
-                  <p className="text-lg leading-snug text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}>
+                  <h3 className="text-xl font-semibold leading-snug text-[#1f1d2b]">
                     {f.claim}
+                  </h3>
+                  <p className="mt-1.5 text-[15px] leading-relaxed text-[#1f1d2b]/75">
+                    {f.body}
                   </p>
-                  <p className="mt-2 text-xs text-[#1f1d2b]/50">Source: {f.source}</p>
-                </div>
-                <div className="mt-5">
-                  <StrengthMeter value={f.strength} valid={f.valid} />
-                </div>
-              </motion.article>
-            ))}
+
+                  <div className="mt-3 max-w-sm">
+                    <StrengthMeter value={f.validity} />
+                  </div>
+
+                  <div
+                    className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-[#312E81]/60"
+                    style={{ fontFamily: "'Inter', sans-serif" }}
+                  >
+                    <span>
+                      <span className="text-[#312E81]/40">Source:</span>{" "}
+                      <cite className="not-italic">{f.source}</cite>
+                    </span>
+                    <span>
+                      <span className="text-[#312E81]/40">Last validated:</span>{" "}
+                      {f.validated}
+                    </span>
+                    <button
+                      onClick={() => revalidate(f.id)}
+                      disabled={revalidating === f.id}
+                      className="ml-auto rounded border border-[#312E81]/30 px-2.5 py-1 font-medium text-[#312E81] transition hover:bg-[#312E81]/5 disabled:opacity-50"
+                    >
+                      {revalidating === f.id ? "validating…" : "↻ Re-validate"}
+                    </button>
+                  </div>
+                </motion.article>
+              ))}
+            </AnimatePresence>
+
+            {visible.length === 0 && (
+              <p className="py-16 text-center italic text-[#312E81]/40">
+                No entries match this search.
+              </p>
+            )}
           </div>
-        </div>
-      </section>
+        </main>
+      </div>
 
-      {/* How it works */}
-      <section id="how" className="mx-auto max-w-6xl px-6 py-24">
-        <motion.h2
-          initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.6 }}
-          className="text-4xl text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}
-        >
-          How a fact enters memory
-        </motion.h2>
-        <div className="mt-12 grid gap-10 md:grid-cols-3">
-          {STEPS.map((s, i) => (
-            <motion.div
-              key={s.n}
-              initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.5, delay: i * 0.1 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[#312E81]/30 text-xl text-[#312E81]" style={{ fontFamily: "'Spectral', serif" }}>{s.n}</div>
-              <h3 className="mt-4 text-xl text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}>{s.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[#1f1d2b]/65">{s.body}</p>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* Features */}
-      <section id="features" className="border-y border-[#312E81]/12 bg-white">
-        <div className="mx-auto max-w-6xl px-6 py-24">
-          <motion.h2
-            initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.6 }}
-            className="text-4xl text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}
+      {/* contribute-fact modal */}
+      <AnimatePresence>
+        {composing && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1f1d2b]/40 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setComposing(false)}
           >
-            A scholarly record you can trust
-          </motion.h2>
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f, i) => (
-              <motion.div
-                key={f.title}
-                initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.45, delay: i * 0.05 }}
-                className="rounded-xl border border-[#312E81]/12 bg-[#FBFAF7] p-7"
-              >
-                <h3 className="text-xl text-[#312E81]" style={{ fontFamily: "'Spectral', serif" }}>{f.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#1f1d2b]/65">{f.body}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Submit form */}
-      <section id="submit" className="mx-auto max-w-3xl px-6 py-24">
-        <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.6 }} className="text-center">
-          <h2 className="text-4xl text-[#1f1d2b]" style={{ fontFamily: "'Spectral', serif" }}>Submit a fact for validation</h2>
-          <p className="mt-3 text-[#1f1d2b]/65">Propose a claim with its source and receive a validity verdict.</p>
-        </motion.div>
-
-        <motion.form
-          onSubmit={onSubmit}
-          initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} transition={{ duration: 0.6, delay: 0.1 }}
-          className="mt-10 space-y-5 rounded-2xl border border-[#312E81]/15 bg-white p-8"
-        >
-          <div>
-            <label className="mb-1.5 block text-xs uppercase tracking-[0.2em] text-[#312E81]/55">Claim</label>
-            <textarea
-              value={claim}
-              onChange={(e) => setClaim(e.target.value)}
-              rows={3}
-              placeholder="State a fact to be validated…"
-              className="w-full resize-none rounded-lg border border-[#312E81]/20 bg-[#FBFAF7] px-4 py-3 text-sm outline-none transition focus:border-[#312E81]"
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs uppercase tracking-[0.2em] text-[#312E81]/55">Source URL</label>
-            <input
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="https://source.example/reference"
-              className="w-full rounded-lg border border-[#312E81]/20 bg-[#FBFAF7] px-4 py-3 text-sm outline-none transition focus:border-[#312E81]"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-[#312E81] px-6 py-3.5 text-sm text-[#FBFAF7] transition hover:bg-[#312E81]/90 disabled:opacity-60"
-          >
-            {loading ? "Validating…" : "Validate this claim"}
-          </button>
-
-          {loading && (
-            <div className="flex items-center justify-center gap-2 pt-2 text-sm text-[#312E81]/60">
-              <span className="h-2 w-2 animate-ping rounded-full bg-[#312E81]" />
-              Fetching evidence · validators reaching consensus…
-            </div>
-          )}
-
-          {result && (
             <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className={`mt-2 rounded-xl border-l-4 bg-[#FBFAF7] p-6 ${result.valid ? "border-[#312E81]" : "border-[#9a3b3b]"}`}
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-lg rounded-lg bg-[#FBFAF7] p-6 shadow-2xl"
             >
-              <div className="mb-4 flex items-center justify-between">
-                <span className={`text-2xl ${result.valid ? "text-[#312E81]" : "text-[#9a3b3b]"}`} style={{ fontFamily: "'Spectral', serif" }}>
-                  {result.valid ? "Validated" : "Not validated"}
-                </span>
-                <span className="text-xs text-[#1f1d2b]/50">{result.validations} validation</span>
+              <h3 className="mb-1 text-xl font-semibold text-[#312E81]">
+                Contribute a fact
+              </h3>
+              <p className="mb-4 text-sm italic text-[#312E81]/55">
+                New entries enter the archive at 50% consensus and are validated
+                over time.
+              </p>
+              <div className="space-y-3" style={{ fontFamily: "'Inter', sans-serif" }}>
+                <input
+                  value={draft.claim}
+                  onChange={(e) => setDraft({ ...draft, claim: e.target.value })}
+                  placeholder="The claim (stated as a heading)"
+                  className="w-full rounded-md border border-[#312E81]/20 bg-white px-3 py-2 text-sm outline-none focus:border-[#312E81]/50"
+                />
+                <textarea
+                  value={draft.body}
+                  onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+                  rows={3}
+                  placeholder="Supporting elaboration (optional)"
+                  className="w-full resize-none rounded-md border border-[#312E81]/20 bg-white px-3 py-2 text-sm outline-none focus:border-[#312E81]/50"
+                />
+                <div className="flex gap-3">
+                  <select
+                    value={draft.category}
+                    onChange={(e) =>
+                      setDraft({ ...draft, category: e.target.value as Category })
+                    }
+                    className="w-1/2 rounded-md border border-[#312E81]/20 bg-white px-3 py-2 text-sm outline-none focus:border-[#312E81]/50"
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={draft.source}
+                    onChange={(e) => setDraft({ ...draft, source: e.target.value })}
+                    placeholder="Source citation"
+                    className="w-1/2 rounded-md border border-[#312E81]/20 bg-white px-3 py-2 text-sm outline-none focus:border-[#312E81]/50"
+                  />
+                </div>
               </div>
-              <StrengthMeter value={result.strength} valid={result.valid} />
-              <p className="mt-4 text-sm leading-relaxed text-[#1f1d2b]/75">{result.reasoning}</p>
+              <div className="mt-5 flex justify-end gap-3" style={{ fontFamily: "'Inter', sans-serif" }}>
+                <button
+                  onClick={() => setComposing(false)}
+                  className="rounded-md px-4 py-2 text-sm text-[#312E81]/60 transition hover:text-[#312E81]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitFact}
+                  className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e]"
+                >
+                  Submit to archive
+                </button>
+              </div>
             </motion.div>
-          )}
-        </motion.form>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-[#312E81]/12 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-12 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-lg text-[#312E81]" style={{ fontFamily: "'Spectral', serif" }}>Consensus<span className="font-semibold">Memory</span></p>
-            <p className="mt-1 text-sm text-[#1f1d2b]/55">A shared archive of validated knowledge, evolving over time.</p>
-          </div>
-          <div className="text-sm text-[#1f1d2b]/55">
-            <p className="uppercase tracking-[0.2em] text-[#312E81]/45">Contract</p>
-            <p className="mt-1 break-all font-mono text-xs text-[#312E81]">{CONTRACT}</p>
-          </div>
-        </div>
-        <div className="border-t border-[#312E81]/12 py-5 text-center text-xs text-[#1f1d2b]/45">
-          © {new Date().getFullYear()} ConsensusMemory. Knowledge, validated and preserved.
-        </div>
-      </footer>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+export default App;
