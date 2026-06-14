@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
-import { read, write, CONTRACT } from "./genlayer";
+import { read, write, CONTRACT, connectWallet, isWalletConnected } from "./genlayer";
 
 type Category =
   | "Science"
@@ -94,6 +94,19 @@ function App() {
     category: "Science" as Category,
     source: "",
   });
+  const [wallet, setWallet] = useState<string | null>(null);
+
+  const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  const handleConnect = async () => {
+    try {
+      const addr = await connectWallet();
+      setWallet(addr);
+      toast.success(`Wallet connected · ${shortAddr(addr)}`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to connect wallet");
+    }
+  };
 
   const counts = useMemo(() => {
     const m: Record<string, number> = { All: facts.length };
@@ -215,13 +228,26 @@ function App() {
                 a living archive of validated knowledge
               </span>
             </div>
-            <button
-              onClick={() => setComposing(true)}
-              className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e]"
-              style={{ fontFamily: "'Inter', sans-serif" }}
-            >
-              + Contribute fact
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleConnect}
+                className="rounded-md border border-[#312E81]/30 px-4 py-2 text-sm font-medium text-[#312E81] transition hover:bg-[#312E81]/5"
+                style={{ fontFamily: "'Inter', sans-serif" }}
+              >
+                {wallet
+                  ? shortAddr(wallet)
+                  : isWalletConnected()
+                    ? "Connected"
+                    : "Connect Wallet"}
+              </button>
+              <button
+                onClick={() => setComposing(true)}
+                className="rounded-md bg-[#312E81] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d3a9e]"
+                style={{ fontFamily: "'Inter', sans-serif" }}
+              >
+                + Contribute fact
+              </button>
+            </div>
           </div>
 
           {/* big centered wiki search */}
