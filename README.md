@@ -10,10 +10,6 @@ Fact validation requires fetching live sources and interpreting whether they sup
 
 **GenLayer (Bradbury):** `0x45F6bef6812834bC17ff5798738e543FB4cA7A8E`
 
-## Test
-
-Posted: "Eiffel Tower is 330 meters tall" → valid=false (Wikipedia returned incomplete HTML). Correct behavior: no evidence = no validation.
-
 ## Structure
 
 ```
