@@ -2,6 +2,49 @@
 import json
 from genlayer import *
 
+FACT_STRENGTH_THRESHOLD = 50  # strength >= this => valid
+
+
+def _coerce_int(value, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_fact_verdict(data: dict) -> dict:
+    """Clamp strength to [0,100] and DERIVE valid == (strength >= threshold)."""
+    strength = max(0, min(100, _coerce_int(data.get("strength"), 0)))
+    reasoning = str(data.get("reasoning") or "").strip() or "no reasoning provided"
+    return {
+        "valid": bool(strength >= FACT_STRENGTH_THRESHOLD),
+        "strength": strength,
+        "reasoning": reasoning,
+    }
+
+
+def validate_fact_verdict(data: dict) -> bool:
+    """Deterministic anchor: strength range + valid == (strength >= threshold)
+    + non-empty reasoning."""
+    strength = data.get("strength")
+    if not isinstance(strength, int) or isinstance(strength, bool):
+        return False
+    if strength < 0 or strength > 100:
+        return False
+    valid = data.get("valid")
+    if not isinstance(valid, bool):
+        return False
+    if valid != (strength >= FACT_STRENGTH_THRESHOLD):
+        return False
+    reasoning = data.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return False
+    return True
+
 class ConsensusMemory(gl.Contract):
     facts: TreeMap[str, str]
     fact_count: u256
@@ -37,10 +80,11 @@ class ConsensusMemory(gl.Contract):
                 except: pass
             prompt = f"""Validate this fact against evidence.\nCLAIM: {claim}\nEVIDENCE:\n{evidence}\n\nReply JSON: {{"valid": true/false, "strength": <0-100>, "reasoning": "<brief>"}}"""
             raw = gl.nondet.exec_prompt(prompt, response_format="json")
-            return json.dumps(raw) if isinstance(raw, dict) else str(raw).strip()
+            data = raw if isinstance(raw, dict) else json.loads(str(raw).strip())
+            return json.dumps(normalize_fact_verdict(data))
         def validator_fn(r) -> bool:
             if not isinstance(r, gl.vm.Return): return False
-            try: d = json.loads(r.calldata); return isinstance(d.get("valid"), bool) and isinstance(d.get("strength"), int)
+            try: return validate_fact_verdict(json.loads(r.calldata))
             except: return False
         return json.loads(gl.vm.run_nondet_unsafe(leader_fn, validator_fn))
 
